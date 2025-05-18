@@ -84,5 +84,4 @@ async function seed() {
     process.exit();
   }
 }
-
 seed()

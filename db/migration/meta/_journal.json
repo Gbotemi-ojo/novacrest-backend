@@ -1,12 +1,12 @@
 {
   "version": "7",
-  "dialect": "postgresql",
+  "dialect": "mysql",
   "entries": [
     {
-      "idx": 3,
-      "version": "7",
-      "when": 1742890636268,
-      "tag": "0003_next_skaar",
+      "idx": 0,
+      "version": "5",
+      "when": 1747500460407,
+      "tag": "0000_flat_dexter_bennett",
       "breakpoints": true
     }
   ]
