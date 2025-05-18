@@ -1,27 +1,46 @@
+import 'dotenv/config'; // Make sure this is at the very top
 import { defineConfig } from 'drizzle-kit';
-// Removed: import "dotenv/config"; // dotenv is not needed if not using process.env
 
-// Removed: console.log statements
+// Define and validate environment variables
+const DB_HOST = process.env.DB_HOST;
+const DB_PORT = process.env.DB_PORT;
+const DB_DATABASE = process.env.DB_DATABASE;
+const DB_USER = process.env.DB_USER;
+const DB_PASSWORD = process.env.DB_PASSWORD;
+
+if (!DB_HOST) {
+    throw new Error('DB_HOST is not set in .env');
+}
+if (!DB_DATABASE) {
+    throw new Error('DB_DATABASE is not set in .env');
+}
+if (!DB_USER) {
+    throw new Error('DB_USER is not set in .env');
+}
+if (!DB_PASSWORD) {
+    throw new Error('DB_PASSWORD is not set in .env');
+}
+
+// Convert port to a number, with a fallback and type assertion
+const parsedDbPort = DB_PORT ? parseInt(DB_PORT, 10) : undefined;
+if (DB_PORT && isNaN(parsedDbPort!)) { // Check if parsing failed for a defined port
+    throw new Error('DB_PORT in .env is not a valid number');
+}
+
 
 export default defineConfig({
-  schema: './db/schema.ts', // Path to your Drizzle schema file
-  out: './db/migration',   // Directory for migration files
-  dialect: 'mysql',        // Set the dialect to 'mysql'
+  schema: './db/schema.ts',
+  out: './db/migration',
+  dialect: 'mysql',
 
   dbCredentials: {
-    // Using hardcoded strings for all credentials as requested
-    host: 'panel909.harmondns.net', // Use 'localhost' if your app is on the same cPanel account
-    // If connecting remotely, you would need your domain name or server IP here,
-    // AND you must enable "Remote MySQL" in cPanel for the connecting IP.
-    port: 3306, // Standard MySQL port
-    database: 'novacres_storage', // Your database name from cPanel
-    user: 'novacres_oluwagbotemi', // Your database username from cPanel
-    password: 'Takeoff0Takeoff0', // Hardcoded password
-    // For MySQL, you typically don't need 'ssl' unless specifically configured
-    // If your cPanel requires SSL for MySQL, you might need to add:
-    // ssl: { rejectUnauthorized: true } // Or adjust based on your server's SSL setup
+    host: DB_HOST,         // Now guaranteed to be string
+    port: parsedDbPort,    // Can be number or undefined (if not set in .env)
+    database: DB_DATABASE, // Now guaranteed to be string
+    user: DB_USER,         // Now guaranteed to be string
+    password: DB_PASSWORD, // Now guaranteed to be string
   },
 
-  verbose: true, // Enable verbose logging for Drizzle commands
-  strict: true   // Enable strict mode
+  verbose: true,
+  strict: true
 });

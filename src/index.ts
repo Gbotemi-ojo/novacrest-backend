@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
@@ -18,12 +19,13 @@ app.use(cors());
 app.use(express.json());
 
 const dbCredentials = {
-    host: 'panel909.harmondns.net',
-    port: 3306,
-    database: 'novacres_storage',
-    user: 'novacres_oluwagbotemi',
-    password: 'Takeoff0Takeoff0',
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT || '3306', 10),
+    database: process.env.DB_DATABASE,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
 };
+console.log(dbCredentials)
 
 const pool: Pool = mysql.createPool({
     host: dbCredentials.host,
