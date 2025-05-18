@@ -9,7 +9,9 @@
     "db:mig": "npx drizzle-kit migrate",
     "studio": "npx drizzle-kit studio",
     "seed": "ts-node seedData.ts",
-    "start": "nodemon src/index.ts"
+    "dev": "nodemon src/index.ts",
+    "start": "ts-node src/index.ts",
+    "vercel-build": "echo hello"
   },
   "keywords": [],
   "author": "",
