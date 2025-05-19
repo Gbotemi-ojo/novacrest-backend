@@ -2,13 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
-import mysql, { Pool } from 'mysql2/promise';
+import mysql from 'mysql2/promise';
 import { drizzle } from 'drizzle-orm/mysql2';
 import { eq } from 'drizzle-orm';
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import fs from 'fs';
 import path from 'path';
+import nodemailer from 'nodemailer';
 
 import { categories, products, blogs, emailSubscriptions } from '../db/schema';
 import * as schema from '../db/schema';
@@ -27,7 +28,7 @@ const dbCredentials = {
 };
 console.log(dbCredentials)
 
-const pool: Pool = mysql.createPool({
+const pool = mysql.createPool({
     host: dbCredentials.host,
     port: dbCredentials.port,
     database: dbCredentials.database,
@@ -86,18 +87,170 @@ const upload = multer({ storage });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
-function authenticateToken(req: any, res: any, next: any) {
+function authenticateToken(req:any, res:any, next:any) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.sendStatus(401);
-    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+    jwt.verify(token, JWT_SECRET, (err:any, user:any) => {
         if (err) return res.sendStatus(403);
         req.user = user;
         next();
     });
 }
 
-app.post('/auth/signin', (req, res): any => {
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '465', 10),
+    secure: process.env.SMTP_PORT === '465',
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    },
+});
+
+transporter.verify(function (error, success) {
+    if (error) {
+        console.error("Transporter verification failed:", error);
+        console.error("Please check your .env file and network connectivity.");
+    } else {
+        console.log("Server is ready to send messages using cPanel SMTP!");
+    }
+});
+
+const NOVACREST_WELCOME_HTML = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f7f7f7;
+            margin: 0;
+            padding: 0;
+            -webkit-text-size-adjust: none;
+            width: 100% !important;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border: 1px solid #e9e9e9;
+        }
+        .header {
+            background-color: #2c7da0;
+            padding: 20px 20px;
+            text-align: center;
+            color: #ffffff;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .header h1 {
+            margin: 0;
+            line-height: 1.2;
+        }
+        .content {
+            padding: 30px;
+            color: #333333;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+        .content h2 {
+            color: #2c7da0;
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        .button-container {
+            text-align: center;
+            padding: 20px 0;
+        }
+        .button {
+            display: inline-block;
+            background-color: #34a0a4;
+            color: #ffffff;
+            padding: 14px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 18px;
+            transition: background-color 0.3s ease;
+        }
+        .button:hover {
+            background-color: #26797b;
+        }
+        .footer {
+            background-color: #f0f0f0;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 13px;
+            color: #777777;
+            border-top: 1px solid #e0e0e0;
+        }
+        .footer a {
+            color: #2c7da0;
+            text-decoration: none;
+        }
+        .footer p {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>Welcome to Novacrest Pharmacy!</h1>
+        </div>
+        <div class="content">
+            <p>Dear Valued Customer,</p>
+            <p>We're absolutely thrilled to welcome you to the Novacrest Pharmacy family! Your health and well-being are our top priority, and we're committed to providing you with trusted medications, expert advice, and compassionate care.</p>
+            <p>At Novacrest, we believe in a healthier community, one person at a time. Whether you need a prescription filled, over-the-counter essentials, or personalized health consultations, our dedicated team is here to support you every step of the way.</p>
+            <h2>Why Choose Novacrest Pharmacy?</h2>
+            <ul>
+                <li><strong>Expert Pharmacists:</strong> Our knowledgeable team is always ready to offer professional advice.</li>
+                <li><strong>Quality Products:</strong> We stock a wide range of reliable and effective health products.</li>
+                <li><strong>Personalized Care:</strong> Your unique health needs are important to us.</li>
+                <li><strong>Community Focused:</strong> We're more than just a pharmacy; we're your health partner.</li>
+            </ul>
+            <p>We invite you to visit us and experience the Novacrest difference firsthand. Our friendly staff is eager to assist you with all your pharmaceutical needs.</p>
+            <div class="button-container">
+                <a href="https://www.novacrest.com.ng" class="button">Visit Our Pharmacy</a>
+            </div>
+            <p>Thank you for choosing Novacrest Pharmacy. We look forward to serving you!</p>
+            <p>Warmly,</p>
+            <p>The Team at Novacrest Pharmacy</p>
+        </div>
+        <div class="footer">
+            <p>Novacrest Pharmacy &copy; 2025. All rights reserved.</p>
+            <p>Shop 4 Yummy Yummy Plaza, Sam Ethnan Air Force Base, Ikeja, Lagos</p>
+            <p><a href="tel:+2349165434330">+234 916 543 4330</a> | <a href="mailto:info@novacrest.com.ng">info@novacrest.com.ng</a></p>
+        </div>
+    </div>
+</body>
+</html>
+`;
+
+async function sendNovacrestWelcomeEmail(toEmail:any) {
+    const senderName = process.env.SENDER_NAME || 'Novacrest Pharmacy';
+
+    try {
+        const info = await transporter.sendMail({
+            from: `"${senderName}" <${process.env.SMTP_USER}>`,
+            to: toEmail,
+            subject: 'Welcome to Novacrest Pharmacy - Your Health Partner!',
+            html: NOVACREST_WELCOME_HTML,
+        });
+        console.log(`Welcome message sent to ${toEmail}: ${info.messageId}`);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error(`Error sending welcome email to ${toEmail}:`, error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+}
+
+app.post('/auth/signin', (req:any, res:any) => {
     const { username, password } = req.body;
     if (username === 'admin' && password === 'superpassword001') {
         const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
@@ -107,11 +260,11 @@ app.post('/auth/signin', (req, res): any => {
     }
 });
 
-app.post('/auth/signout', (req, res): any => {
+app.post('/auth/signout', (req:any, res:any) => {
     return res.json({ message: 'Signed out successfully' });
 });
 
-app.get('/products/:id', authenticateToken, async (req, res): Promise<any> => {
+app.get('/products/:id', authenticateToken, async (req:any, res:any) => {
     const productId = req.params.id;
 
     try {
@@ -149,11 +302,11 @@ app.get('/products', authenticateToken, async (req, res) => {
 
 app.post('/products', authenticateToken, upload.single('picture'), async (req, res) => {
     const { name, price, description, categoryId, imageUrl } = req.body;
-    let pictureUrl: string | undefined;
+    let pictureUrl;
 
     try {
         if (req.file) {
-            const result: any = await cloudinary.uploader.upload(req.file.path);
+            const result = await cloudinary.uploader.upload(req.file.path);
             pictureUrl = result.secure_url;
             fs.unlinkSync(req.file.path);
         } else if (imageUrl && imageUrl.trim() !== '') {
@@ -170,22 +323,19 @@ app.post('/products', authenticateToken, upload.single('picture'), async (req, r
 
         const insertedProduct = await db.select().from(products).orderBy(eq(products.id, newProduct.insertId)).limit(1);
 
-
         res.json(insertedProduct[0]);
     } catch (error) {
         res.status(500).json({ error: 'Error creating product' });
     }
 });
 
-
-
 app.put('/products/:id', authenticateToken, upload.single('picture'), async (req, res) => {
     const productId = req.params.id;
     const { name, price, description, categoryId } = req.body;
-    let pictureUrl: string | undefined;
+    let pictureUrl;
     try {
         if (req.file) {
-            const result: any = await cloudinary.uploader.upload(req.file.path);
+            const result = await cloudinary.uploader.upload(req.file.path);
             pictureUrl = result.secure_url;
             fs.unlinkSync(req.file.path);
         }
@@ -215,7 +365,7 @@ app.delete('/products/:id', authenticateToken, async (req, res) => {
     }
 });
 
-app.get('/categories/:id', async (req, res): Promise<any> => {
+app.get('/categories/:id', async (req:any, res:any) => {
     const categoryId = req.params.id;
 
     try {
@@ -231,7 +381,6 @@ app.get('/categories/:id', async (req, res): Promise<any> => {
     }
 });
 
-
 app.get('/categories', async (req, res) => {
     try {
         const allCategories = await db.select().from(categories);
@@ -241,7 +390,7 @@ app.get('/categories', async (req, res) => {
     }
 });
 
-app.post('/categories', authenticateToken, async (req, res): Promise<any> => {
+app.post('/categories', authenticateToken, async (req:any, res:any) => {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: 'Category name is required' });
 
@@ -256,7 +405,7 @@ app.post('/categories', authenticateToken, async (req, res): Promise<any> => {
     }
 });
 
-app.put('/categories/:id', authenticateToken, async (req, res): Promise<any> => {
+app.put('/categories/:id', authenticateToken, async (req:any, res:any) => {
     const categoryId = req.params.id;
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: 'Category name is required' });
@@ -272,7 +421,7 @@ app.put('/categories/:id', authenticateToken, async (req, res): Promise<any> => 
     }
 });
 
-app.delete('/categories/:id', authenticateToken, async (req, res): Promise<any> => {
+app.delete('/categories/:id', authenticateToken, async (req:any, res:any) => {
     const categoryId = parseInt(req.params.id);
 
     if (isNaN(categoryId)) {
@@ -309,10 +458,10 @@ app.get('/blogs', async (req, res) => {
 
 app.post('/blogs', authenticateToken, upload.single('thumbnail'), async (req, res) => {
     const { title, content } = req.body;
-    let thumbnailUrl: string | undefined;
+    let thumbnailUrl;
     try {
         if (req.file) {
-            const result: any = await cloudinary.uploader.upload(req.file.path);
+            const result = await cloudinary.uploader.upload(req.file.path);
             thumbnailUrl = result.secure_url;
             fs.unlinkSync(req.file.path);
         }
@@ -334,10 +483,10 @@ app.post('/blogs', authenticateToken, upload.single('thumbnail'), async (req, re
 app.put('/blogs/:id', authenticateToken, upload.single('thumbnail'), async (req, res) => {
     const blogId = req.params.id;
     const { title, content } = req.body;
-    let thumbnailUrl: string | undefined;
+    let thumbnailUrl;
     try {
         if (req.file) {
-            const result: any = await cloudinary.uploader.upload(req.file.path);
+            const result = await cloudinary.uploader.upload(req.file.path);
             thumbnailUrl = result.secure_url;
             fs.unlinkSync(req.file.path);
         }
@@ -365,7 +514,7 @@ app.delete('/blogs/:id', authenticateToken, async (req, res) => {
     }
 });
 
-app.get('/subscriptions', async (req, res): Promise<any> => {
+app.get('/subscriptions', async (req, res) => {
     try {
         const emails = await db.select().from(emailSubscriptions);
         res.json(emails);
@@ -375,7 +524,7 @@ app.get('/subscriptions', async (req, res): Promise<any> => {
     }
 });
 
-app.post('/subscriptions', async (req, res): Promise<any> => {
+app.post('/subscriptions', async (req:any, res:any) => {
     const { email } = req.body;
 
     if (!email) {
@@ -394,21 +543,29 @@ app.post('/subscriptions', async (req, res): Promise<any> => {
 
         const insertedSubscription = await db.select().from(emailSubscriptions).orderBy(eq(emailSubscriptions.id, newSubscription.insertId)).limit(1);
 
-        res.status(201).json(insertedSubscription[0]);
-    } catch (error: any) {
+        const emailSendResult = await sendNovacrestWelcomeEmail(email);
+
+        res.status(201).json({
+            message: 'Email subscribed successfully!',
+            subscription: insertedSubscription[0],
+            emailStatus: emailSendResult.success ? 'Welcome email sent.' : `Welcome email failed to send: ${emailSendResult.error}`
+        });
+
+    } catch (error) {
         console.error('Error creating email subscription:', error);
 
-        if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({ error: 'This email is already subscribed.' });
+        if (typeof error === 'object' && error !== null && 'code' in error && (error as any).code === 'ER_DUP_ENTRY') {
+            await sendNovacrestWelcomeEmail(email);
+            return res.status(409).json({ error: 'This email is already subscribed. Welcome email re-sent.' });
         }
 
         res.status(500).json({ error: 'Error creating email subscription.' });
     }
 });
-app.get("test", (req, res) => {
+
+app.get("/test", (req, res) => {
     res.json({ message: "Hello from the test endpoint!" });
-}
-);
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
