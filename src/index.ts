@@ -10,6 +10,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import fs from 'fs';
 import path from 'path';
 import nodemailer from 'nodemailer';
+import axios from 'axios';
 
 import { categories, products, blogs, emailSubscriptions } from '../db/schema';
 import * as schema from '../db/schema';
@@ -19,6 +20,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY; // Get your secret key from environment variables
+const PAYSTACK_API_URL = 'https://api.paystack.co';
 const dbCredentials = {
     host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT || '3306', 10),
@@ -562,7 +565,227 @@ app.post('/subscriptions', async (req:any, res:any) => {
         res.status(500).json({ error: 'Error creating email subscription.' });
     }
 });
+// EXPRESS DEMO ------------------------------------>
 
+function haversine(lat1:any, lon1:any, lat2:any, lon2:any) {
+  const toRad = (deg: number) => deg * Math.PI / 180;
+  const R = 6371; // Earth radius in km
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+            Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Geocode an address using Nominatim via axios
+async function geocode(address: string) {
+  const params = {
+    q: address,
+    format: 'json',
+    limit: 1
+  };
+  try {
+    const response = await axios.get('https://nominatim.openstreetmap.org/search', {
+      params,
+      headers: { 'User-Agent': 'MyPharmacyApp/1.0 (contact@yourdomain.com)' } // Important: Provide a valid User-Agent
+    });
+    const data = response.data;
+    console.log("Geocoding response data:", data);
+    if (!data || data.length === 0) {
+      throw new Error('Address not found or could not be geocoded.');
+    }
+    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  } catch (error) {
+    if (error && typeof error === 'object' && 'response' in error && error.response && typeof error.response === 'object' && 'data' in error.response) {
+      // @ts-ignore
+      console.error("Geocoding error:", error.response.data);
+      // @ts-ignore
+      throw new Error(`Geocoding failed: ${error.response.data.error || 'Server error'}`);
+    } else {
+      // @ts-ignore
+      console.error("Geocoding error:", error.message || error);
+      // @ts-ignore
+      throw new Error(`Geocoding failed: ${error.message || error}`);
+    }
+  }
+}
+
+// Pharmacy branches in Lagos State
+const branches = [
+  { id: 1, name: 'Ikeja Pharmacy', lat: 6.6020, lon: 3.3515 },
+  { id: 2, name: 'Victoria Island Pharmacy', lat: 6.4281, lon: 3.4216 },
+  { id: 3, name: 'Lekki Pharmacy', lat: 6.4654, lon: 3.4765 },
+  { id: 4, name: 'Surulere Pharmacy', lat: 6.5097, lon: 3.3619 }
+];
+
+// Find nearest branch
+function findNearestBranch(userCoords: { lat: number; lon: number; }) {
+  return branches.reduce(
+    (nearest, branch) => {
+      const distance = haversine(userCoords.lat, userCoords.lon, branch.lat, branch.lon);
+      if (distance < nearest.distance) {
+        return { branch, distance };
+      }
+      return nearest;
+    },
+    { branch: branches[0], distance: haversine(userCoords.lat, userCoords.lon, branches[0].lat, branches[0].lon) }
+  );
+}
+
+// POST /assign-branch endpoint
+app.post('/assign-branch', async (req:any, res:any) => {
+  const { address } = req.body;
+  if (!address) {
+    return res.status(400).json({ error: 'Address is required' });
+  }
+
+  try {
+    const userCoords = await geocode(address);
+    const { branch, distance } = findNearestBranch(userCoords);
+    res.json({
+      nearestBranch: branch,
+      distanceKm: parseFloat(distance.toFixed(2))
+    });
+  } catch (err) {
+    if (err && typeof err === 'object' && 'message' in err) {
+      console.error("Error in /assign-branch:", (err as any).message);
+      res.status(500).json({ error: (err as any).message });
+    } else {
+      console.error("Error in /assign-branch:", err);
+      res.status(500).json({ error: String(err) });
+    }
+  }
+});
+
+// GET /branches (list all branches) endpoint
+app.get('/branches', (req, res) => {
+  res.json(branches);
+});
+
+// --- Paystack Payment Logic ---
+
+// Route to initiate a payment
+app.post('/initiate-payment', async (req:any, res:any) => {
+  console.log('Received initiate-payment request');
+  const { email, amount, currency, frontendCallbackOrigin } = req.body;
+
+  // Basic validation
+  if (!email || !amount || !currency || !frontendCallbackOrigin) {
+    return res.status(400).json({ error: 'Missing required fields: email, amount, currency, or frontendCallbackOrigin' });
+  }
+
+  try {
+    // Prepare data for Paystack initialization
+    const data = {
+      email: email,
+      amount: amount * 100, // Amount in kobo (or the smallest currency unit)
+      currency: currency,
+      // Construct the callback_url using the frontend's origin
+      callback_url: `${frontendCallbackOrigin}/paystack-callback`
+    };
+    console.log('Initiating Paystack transaction with data:', data);
+
+    // Make a POST request to Paystack initialization endpoint
+    const response = await axios.post(`${PAYSTACK_API_URL}/transaction/initialize`, data, {
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log('Paystack initialization response:', response.data);
+    // Send the Paystack response back to the client
+    res.status(200).json(response.data);
+
+  } catch (error) {
+    if (error && typeof error === 'object' && 'response' in error && error.response && typeof error.response === 'object' && 'data' in error.response) {
+      // @ts-ignore
+      console.error('Error initiating payment:', error.response.data);
+    } else {
+      // @ts-ignore
+      console.error('Error initiating payment:', error && typeof error === 'object' && 'message' in error ? (error as any).message : String(error));
+    }
+    res.status(500).json({
+      error: 'Failed to initiate payment',
+      details: (error as any).response ? (error as any).response.data : (error as any).message
+    });
+  }
+});
+
+// Route to handle Paystack callback (webhook) - This is for server-to-server communication
+app.post('/paystack-callback', async (req:any, res:any) => {
+  console.log('Received Paystack callback (webhook)');
+  const { reference } = req.body.data;
+
+  if (!reference) {
+    return res.status(400).json({ error: 'No transaction reference provided in callback' });
+  }
+
+  try {
+    const verificationResponse = await axios.get(`${PAYSTACK_API_URL}/transaction/verify/${reference}`, {
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`
+      }
+    });
+
+    const transactionData = verificationResponse.data.data;
+
+    if (transactionData.status === 'success') {
+      console.log('Payment successful via webhook:', transactionData);
+      // This is where you would definitively update your database and fulfill the order
+      res.status(200).json({ message: 'Callback received and transaction verified successfully' });
+    } else {
+      console.log('Payment not successful via webhook:', transactionData);
+      res.status(200).json({ message: 'Callback received, but transaction not successful' });
+    }
+
+  } catch (error) {
+    const err = error as any;
+    console.error('Error verifying transaction via webhook:', err.response ? err.response.data : err.message);
+    res.status(500).json({
+      error: 'Failed to verify transaction via webhook',
+      details: err.response ? err.response.data : err.message
+    });
+  }
+});
+
+// Route to verify a payment (called by your frontend after Paystack redirect)
+app.post('/verify-payment', async (req:any, res:any) => {
+  const { reference } = req.body;
+
+  if (!reference) {
+    return res.status(400).json({ error: 'Transaction reference is required.' });
+  }
+
+  try {
+    const verificationResponse = await axios.get(`${PAYSTACK_API_URL}/transaction/verify/${reference}`, {
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`
+      }
+    });
+
+    const transactionData = verificationResponse.data.data;
+
+    if (transactionData.status === 'success') {
+      console.log('Frontend requested verification: Payment successful for reference:', reference);
+      res.status(200).json({ status: 'success', message: 'Payment verified successfully.', data: transactionData });
+    } else {
+      console.log('Frontend requested verification: Payment not successful for reference:', reference, 'Status:', transactionData.status);
+      res.status(200).json({ status: transactionData.status, message: 'Payment not successful.', data: transactionData });
+    }
+
+  } catch (error) {
+    console.error('Error verifying transaction from frontend:', (error as any).response ? (error as any).response.data : (error as any).message);
+    res.status(500).json({
+      error: 'Failed to verify transaction on the server.',
+      details: (error as any).response ? (error as any).response.data : (error as any).message
+    });
+  }
+});
+
+// EXPRESS DEMO
 app.get("/test", (req, res) => {
     res.json({ message: "Hello from the test endpoint!" });
 });
